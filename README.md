@@ -82,19 +82,22 @@ python3 generate_template.py demo-app --force
 ## Troubleshooting
 
 - `Missing required command(s)`:
-  - Install missing tools and confirm with `which <command>`.
+   - Install missing tools and confirm with `which <command>`.
+
 - `composer install` fails:
-  - Check PHP/Composer version compatibility and required PHP extensions.
+   - Check PHP/Composer version compatibility and required PHP extensions.
+
 - JS install fails:
-  - Verify Node.js version and lockfile compatibility.
+   - Verify Node.js version and lockfile compatibility.
+
 - `php artisan key:generate` fails:
-  - Ensure `.env` exists (script copies from `.env.example` when available).
+   - Ensure `.env` exists (script copies from `.env.example` when available).
+
 - Permission issues:
-  - Ensure you have write permissions on `--target-dir`.
+   - Ensure you have write permissions on `--target-dir`.
 
 ## Notes
 
 - Designed for macOS/Linux.
 - Windows support is not prioritized in this initial version.
 - Git history from template is detached (new project does not keep template `.git`).
-# Template-vue3-laravel-generate
