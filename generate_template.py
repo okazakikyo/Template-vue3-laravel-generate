@@ -5,8 +5,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -26,7 +29,11 @@ class MissingDependencyError(Exception):
     """Required command not available."""
 
 
-def parse_args() -> argparse.Namespace:
+def is_windows() -> bool:
+    return os.name == "nt"
+
+
+def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Generate a Laravel + Vue project from a GitHub template."
     )
@@ -66,7 +73,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Remove target directory if it already exists.",
     )
-    return parser.parse_args()
+    return parser.parse_args(list(argv) if argv is not None else None)
 
 
 def log(msg: str) -> None:
@@ -77,8 +84,29 @@ def warn(msg: str) -> None:
     print(f"[WARN] {msg}")
 
 
+def shell_quote(arg: str) -> str:
+    if is_windows():
+        if re.search(r'[\s"]', arg):
+            return '"' + arg.replace('"', '\\"') + '"'
+        return arg
+    return shlex.quote(arg)
+
+
+def format_cmd(cmd: list[str]) -> str:
+    return " ".join(shell_quote(part) for part in cmd)
+
+
+def resolve_command(cmd: str) -> str:
+    resolved = shutil.which(cmd)
+    if resolved is None:
+        raise MissingDependencyError(
+            f"Missing required command(s): {cmd}. Install it and retry."
+        )
+    return resolved
+
+
 def run_cmd(cmd: list[str], cwd: Path | None = None, dry_run: bool = False) -> None:
-    pretty = " ".join(cmd)
+    pretty = format_cmd(cmd)
     where = f" (cwd={cwd})" if cwd else ""
     log(f"Run: {pretty}{where}")
     if dry_run:
@@ -108,17 +136,36 @@ def normalize_kebab_name(name: str) -> str:
     return normalized
 
 
-def check_dependencies(js_pm: str, no_install: bool) -> None:
+def check_dependencies(js_pm: str, no_install: bool) -> dict[str, str]:
     required = ["git", "php"]
     if not no_install:
         required.extend(["composer", "node", js_pm])
 
-    missing = [cmd for cmd in required if shutil.which(cmd) is None]
+    resolved: dict[str, str] = {}
+    missing: list[str] = []
+    for cmd in required:
+        path = shutil.which(cmd)
+        if path is None:
+            missing.append(cmd)
+        else:
+            resolved[cmd] = path
+
     if missing:
         missing_str = ", ".join(sorted(set(missing)))
         raise MissingDependencyError(
             f"Missing required command(s): {missing_str}. Install them and retry."
         )
+    return resolved
+
+
+def handle_remove_readonly(func, path, exc_info) -> None:
+    _ = func
+    _ = exc_info
+    os.chmod(path, stat.S_IWRITE)
+    if os.path.isdir(path):
+        shutil.rmtree(path)
+    else:
+        os.remove(path)
 
 
 def ensure_target_dir(target_project_dir: Path, force: bool, dry_run: bool) -> None:
@@ -129,19 +176,28 @@ def ensure_target_dir(target_project_dir: Path, force: bool, dry_run: bool) -> N
             )
         log(f"Target exists and --force is set: removing {target_project_dir}")
         if not dry_run:
-            shutil.rmtree(target_project_dir)
+            shutil.rmtree(target_project_dir, onerror=handle_remove_readonly)
 
     log(f"Creating project directory: {target_project_dir}")
     if not dry_run:
         target_project_dir.mkdir(parents=True, exist_ok=True)
 
 
-def copy_template(repo: str, branch: str, project_dir: Path, dry_run: bool) -> None:
+def copy_template(
+    repo: str,
+    branch: str,
+    project_dir: Path,
+    git_cmd: str,
+    dry_run: bool,
+) -> None:
     with tempfile.TemporaryDirectory(prefix="tpl-vue-laravel-") as temp_dir:
         tmp_path = Path(temp_dir)
         clone_dir = tmp_path / "template"
 
-        run_cmd(["git", "clone", "--depth", "1", "--branch", branch, repo, str(clone_dir)], dry_run=dry_run)
+        run_cmd(
+            [git_cmd, "clone", "--depth", "1", "--branch", branch, repo, str(clone_dir)],
+            dry_run=dry_run,
+        )
 
         if dry_run:
             log(f"Would copy template content from {clone_dir} -> {project_dir}")
@@ -159,7 +215,7 @@ def copy_template(repo: str, branch: str, project_dir: Path, dry_run: bool) -> N
 
         git_dir = project_dir / ".git"
         if git_dir.exists():
-            shutil.rmtree(git_dir)
+            shutil.rmtree(git_dir, onerror=handle_remove_readonly)
 
 
 def update_env_app_name(env_path: Path, project_name: str, dry_run: bool) -> None:
@@ -256,45 +312,62 @@ def update_project_metadata(project_dir: Path, project_name: str, dry_run: bool)
 
 def setup_project(
     project_dir: Path,
+    executables: dict[str, str],
     js_pm: str,
     no_install: bool,
     with_migrate: bool,
     dry_run: bool,
 ) -> None:
     if not no_install:
-        run_cmd(["composer", "install"], cwd=project_dir, dry_run=dry_run)
-        run_cmd([js_pm, "install"], cwd=project_dir, dry_run=dry_run)
+        run_cmd([executables["composer"], "install"], cwd=project_dir, dry_run=dry_run)
+        run_cmd([executables[js_pm], "install"], cwd=project_dir, dry_run=dry_run)
 
     env_exists = (project_dir / ".env").exists() or dry_run
     if env_exists:
-        run_cmd(["php", "artisan", "key:generate"], cwd=project_dir, dry_run=dry_run)
+        run_cmd([executables["php"], "artisan", "key:generate"], cwd=project_dir, dry_run=dry_run)
         if with_migrate:
-            run_cmd(["php", "artisan", "migrate", "--force"], cwd=project_dir, dry_run=dry_run)
+            run_cmd(
+                [executables["php"], "artisan", "migrate", "--force"],
+                cwd=project_dir,
+                dry_run=dry_run,
+            )
     else:
         warn("Skipping artisan commands because .env is missing.")
 
 
 def print_next_steps(project_name: str, js_pm: str) -> None:
     print("\n=== Next steps ===")
-    print(f"cd {project_name}")
-    print("php artisan serve")
-    print(f"{js_pm} run dev")
+    if is_windows():
+        print("PowerShell / CMD:")
+        print(f"cd {project_name}")
+        print("php artisan serve")
+        print(f"{js_pm} run dev")
+    else:
+        print(f"cd {project_name}")
+        print("php artisan serve")
+        print(f"{js_pm} run dev")
 
 
 def run(argv: Iterable[str] | None = None) -> int:
-    _ = argv
-    args = parse_args()
+    args = parse_args(argv)
     validate_project_name(args.project_name)
 
     target_dir = Path(args.target_dir).expanduser().resolve()
     project_dir = target_dir / args.project_name
 
-    check_dependencies(args.js_pm, args.no_install)
+    executables = check_dependencies(args.js_pm, args.no_install)
     ensure_target_dir(project_dir, force=args.force, dry_run=args.dry_run)
-    copy_template(args.repo, args.branch, project_dir, dry_run=args.dry_run)
+    copy_template(
+        args.repo,
+        args.branch,
+        project_dir,
+        git_cmd=executables["git"],
+        dry_run=args.dry_run,
+    )
     update_project_metadata(project_dir, args.project_name, dry_run=args.dry_run)
     setup_project(
         project_dir,
+        executables=executables,
         js_pm=args.js_pm,
         no_install=args.no_install,
         with_migrate=args.with_migrate,

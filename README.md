@@ -7,7 +7,69 @@ CLI script to generate a new project from:
 
 ## Prerequisites
 
-macOS/Linux environment with commands in `PATH`:
+Supported environments:
+
+- macOS
+- Linux
+- Windows 10/11 (`PowerShell` or `CMD`)
+
+## Requirements Before Running The Script
+
+Install and verify these tools first:
+
+- Python `3.9+`
+- Git `2.30+`
+- PHP `8.2+`
+- Composer `2+`
+- Node.js `18+`
+- Database:
+  - `MySQL 8+` if your project uses MySQL
+  - or `SQLite 3+` if you want lightweight local development
+- One JavaScript package manager:
+  - `npm` `9+` (default)
+  - or `pnpm`
+  - or `yarn`
+
+Recommended checks:
+
+```bash
+python3 --version
+git --version
+php --version
+composer --version
+node --version
+npm --version
+```
+
+Database checks:
+
+```bash
+mysql --version
+sqlite3 --version
+```
+
+Windows:
+
+```powershell
+py --version
+git --version
+php --version
+composer --version
+node --version
+npm --version
+```
+
+For Laravel setup to work smoothly, make sure:
+
+- PHP CLI is callable directly from terminal
+- Composer is available in `PATH`
+- Node.js and the selected JS package manager are available in `PATH`
+- MySQL server is installed and running if you use MySQL
+- or SQLite is installed if you use SQLite
+- The template repo can be cloned from GitHub
+- You have write permission to the `--target-dir`
+
+Required commands in `PATH`:
 
 - `git`
 - `php`
@@ -19,6 +81,12 @@ macOS/Linux environment with commands in `PATH`:
 
 ```bash
 python3 generate_template.py my-project
+```
+
+Windows:
+
+```powershell
+py generate_template.py my-project
 ```
 
 This will:
@@ -73,6 +141,19 @@ python3 generate_template.py demo-app --dry-run
 python3 generate_template.py demo-app --force
 ```
 
+Windows PowerShell examples:
+
+```powershell
+# Basic
+py generate_template.py demo-app
+
+# Use pnpm and run migration
+py generate_template.py demo-app --js-pm pnpm --with-migrate
+
+# Preview without executing
+py generate_template.py demo-app --dry-run
+```
+
 ## Exit Codes
 
 - `0`: success
@@ -83,6 +164,7 @@ python3 generate_template.py demo-app --force
 
 - `Missing required command(s)`:
    - Install missing tools and confirm with `which <command>`.
+   - On Windows, confirm with `where <command>`.
 
 - `composer install` fails:
    - Check PHP/Composer version compatibility and required PHP extensions.
@@ -95,9 +177,10 @@ python3 generate_template.py demo-app --force
 
 - Permission issues:
    - Ensure you have write permissions on `--target-dir`.
+   - On Windows, close any Explorer/editor window that is locking the target folder before using `--force`.
 
 ## Notes
 
-- Designed for macOS/Linux.
-- Windows support is not prioritized in this initial version.
+- Works on macOS/Linux/Windows.
+- On Windows, the script resolves common wrappers such as `composer.bat`, `npm.cmd`, `pnpm.cmd`, and `yarn.cmd` automatically when they are available in `PATH`.
 - Git history from template is detached (new project does not keep template `.git`).
